@@ -313,22 +313,37 @@ def localize_with_openai(script: str, target_lang: str) -> str:
 
 
 def localize_with_xkiro(script: str, target_lang: str) -> str:
-    """Localize using xKiro's OpenAI-compatible chat API."""
+    """Localize with xKiro, retrying once on the configured backup model."""
     from openai import OpenAI
     key = os.getenv("XKIRO_API_KEY")
     if not key:
         raise RuntimeError("XKIRO_API_KEY is not configured")
-    model = os.getenv("XKIRO_MODEL", "minimax/minimax-m2.1")
-    client = OpenAI(api_key=key, base_url=os.getenv("XKIRO_BASE_URL", "https://api.xkiro.com/v1"), timeout=60)
+    primary = os.getenv("XKIRO_MODEL", "minimax/minimax-m2.1")
+    backup = os.getenv("XKIRO_BACKUP_MODEL", "mistralai/ministral-3b")
+    models = [primary] + ([backup] if backup != primary else [])
+    client = OpenAI(api_key=key, base_url=os.getenv("XKIRO_BASE_URL", "https://api.xkiro.com/v1"), timeout=15)
     lang = lang_name(target_lang)
-    print(f"[LLM] Calling xKiro {model} for {lang} localization...")
-    response = client.chat.completions.create(model=model, messages=[
+    messages = [
         {"role": "system", "content": f"You are a world-class {lang} copywriter who specializes in ad localization."},
         {"role": "user", "content": LOCALIZATION_PROMPT.format(target_language=lang, source_script=script)},
-    ], temperature=0.7, max_tokens=2048)
-    localized = response.choices[0].message.content.strip()
-    print(f"[LLM] xKiro localized script received ({len(localized)} chars)")
-    return localized
+    ]
+    last_error = None
+    for index, model in enumerate(models):
+        try:
+            print(f"[LLM] Calling xKiro {model} for {lang} localization...")
+            response = client.chat.completions.create(
+                model=model, messages=messages, temperature=0.7, max_tokens=2048
+            )
+            localized = (response.choices[0].message.content or "").strip()
+            if not localized:
+                raise RuntimeError("xKiro returned an empty response")
+            print(f"[LLM] xKiro localized script received ({len(localized)} chars)")
+            return localized
+        except Exception as error:
+            last_error = error
+            if index + 1 < len(models):
+                print(f"[LLM] xKiro {model} failed ({error}); retrying with backup {models[index + 1]}...")
+    raise RuntimeError(f"xKiro localization failed for {', '.join(models)}: {last_error}")
 
 
 def localize_with_anthropic(script: str, target_lang: str) -> str:
