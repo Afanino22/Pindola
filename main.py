@@ -8,8 +8,8 @@ Workflow:
   1. Video Upload / Input
   2. Audio Extraction (ffmpeg)
   3. Speech Transcription (OpenAI Whisper API, or fallback to script)
-  4. Script Localization (OpenAI/Anthropic LLM, or demo fallback)
-  5. Voice Generation / TTS (ElevenLabs/OpenAI, or placeholder)
+  4. Script Localization (Gemini/xKiro/OpenAI/Anthropic LLM, or demo fallback)
+  5. Voice Generation / TTS (Edge/ElevenLabs/OpenAI, or placeholder)
   6. Video + Audio Combination (ffmpeg)
 
 Usage:
@@ -19,7 +19,10 @@ Usage:
     python main.py --script-only          # Script-only mode (no video)
 
 Environment variables (see .env.example):
-    OPENAI_API_KEY       - For AI translation + TTS + Whisper
+    GEMINI_API_KEY       - Primary LLM (Google Gemini) for localization
+    GEMINI_MODEL         - Gemini model name (default: gemini-2.0-flash)
+    XKIRO_API_KEY        - xKiro LLM fallback (OpenAI-compatible)
+    OPENAI_API_KEY       - For GPT-4o translation + TTS + Whisper
     ELEVENLABS_API_KEY   - Optional, for higher-quality TTS
     ANTHROPIC_API_KEY    - Optional, for alternative LLM translation
 """
@@ -85,8 +88,8 @@ def parse_args():
         help="TTS provider (default: auto)",
     )
     parser.add_argument(
-        "--llm", choices=["openai", "anthropic", "xkiro", "auto"], default=os.getenv("LLM_PROVIDER", "auto"),
-        help="LLM provider for localization (default: auto)",
+        "--llm", choices=["openai", "anthropic", "xkiro", "gemini", "auto"], default=os.getenv("LLM_PROVIDER", "auto"),
+        help="LLM provider for localization (default: auto; auto order: gemini -> xkiro -> openai -> demo)",
     )
     parser.add_argument(
         "--demo", action="store_true",
@@ -312,6 +315,29 @@ def localize_with_openai(script: str, target_lang: str) -> str:
     return localized
 
 
+def localize_with_gemini(script: str, target_lang: str) -> str:
+    """Localize with Google Gemini (default: gemini-2.0-flash, fast free tier)."""
+    import google.generativeai as genai
+    key = os.getenv("GEMINI_API_KEY")
+    if not key:
+        raise RuntimeError("GEMINI_API_KEY is not configured")
+    genai.configure(api_key=key)
+    model_name = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    model = genai.GenerativeModel(model_name)
+    lang = lang_name(target_lang)
+    print(f"[LLM] Calling Gemini {model_name} for {lang} localization...")
+    response = model.generate_content(
+        f"You are a world-class {lang} copywriter who specializes in ad localization.\n\n"
+        + LOCALIZATION_PROMPT.format(target_language=lang, source_script=script),
+        request_options={"timeout": 30},  # seconds; Gemini is generally fast
+    )
+    localized = (response.text or "").strip()
+    if not localized:
+        raise RuntimeError("Gemini returned an empty response")
+    print(f"[LLM] Gemini localized script received ({len(localized)} chars)")
+    return localized
+
+
 def localize_with_xkiro(script: str, target_lang: str) -> str:
     """Localize with xKiro, retrying once on the configured backup model."""
     from openai import OpenAI
@@ -364,8 +390,13 @@ def localize_with_anthropic(script: str, target_lang: str) -> str:
 
 
 def localize_script(script: str, target_lang: str, llm_provider: str) -> str:
-    """Translate and culturally localize the ad script. Falls back to demo if no keys."""
+    """Translate and culturally localize the ad script. Falls back to demo if no keys.
+
+    Auto priority: Gemini -> xKiro -> OpenAI -> Anthropic (if set) -> demo.
+    """
     providers = []
+    if llm_provider == "gemini" or (llm_provider == "auto" and os.getenv("GEMINI_API_KEY")):
+        providers.append(("Gemini", localize_with_gemini))
     if llm_provider == "xkiro" or (llm_provider == "auto" and os.getenv("XKIRO_API_KEY")):
         providers.append(("xKiro", localize_with_xkiro))
     if llm_provider in ("openai", "auto") and os.getenv("OPENAI_API_KEY"):
