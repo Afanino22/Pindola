@@ -321,7 +321,7 @@ def localize_with_xkiro(script: str, target_lang: str) -> str:
     primary = os.getenv("XKIRO_MODEL", "minimax/minimax-m2.1")
     backup = os.getenv("XKIRO_BACKUP_MODEL", "mistralai/ministral-3b")
     models = [primary] + ([backup] if backup != primary else [])
-    client = OpenAI(api_key=key, base_url=os.getenv("XKIRO_BASE_URL", "https://api.xkiro.com/v1"), timeout=15)
+    client = OpenAI(api_key=key, base_url=os.getenv("XKIRO_BASE_URL", "https://api.xkiro.com/v1"), timeout=15, max_retries=0)
     lang = lang_name(target_lang)
     messages = [
         {"role": "system", "content": f"You are a world-class {lang} copywriter who specializes in ad localization."},
