@@ -1,0 +1,21 @@
+TITLE: LumaSkin — 30s Ad Script (English)
+LANGUAGE: en
+TARGET_PLATFORM: Meta / TikTok
+
+---
+
+[HOOK — 0-5s, fast-paced, on-screen text]
+"Tired of skincare that promises the world and delivers nothing?"
+
+[PROBLEM — 5-12s, B-roll of frustrated woman looking at mirror]
+"You've tried the 12-step routines. The $200 creams. The viral hacks.
+And your skin still isn't where you want it to be."
+
+[SOLUTION — 12-22s, product hero shot, glowing skin results]
+"Meet LumaSkin. The serum 50,000 women switched to last month.
+One drop. Clinically-proven results in 7 days. No parabens. No false promises.
+Just science-backed radiance that actually works."
+
+[CTA — 22-30s, urgency, link overlay]
+"Try LumaSkin risk-free for 30 days. If you don't see results, it's free.
+Tap the link in bio. Your skin is waiting."

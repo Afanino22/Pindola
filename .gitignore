@@ -1,0 +1,15 @@
+# Local environment / secrets
+.env
+venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# Runtime artifacts
+output/
+uploads/
+jobs.db
+
+# OS
+.DS_Store
