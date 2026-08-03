@@ -81,11 +81,11 @@ def parse_args():
         help="Output directory (default: output/<lang>/)",
     )
     parser.add_argument(
-        "--tts", choices=["openai", "elevenlabs", "auto"], default="auto",
+        "--tts", choices=["openai", "elevenlabs", "edge", "auto"], default=os.getenv("TTS_PROVIDER", "auto"),
         help="TTS provider (default: auto)",
     )
     parser.add_argument(
-        "--llm", choices=["openai", "anthropic", "auto"], default="auto",
+        "--llm", choices=["openai", "anthropic", "xkiro", "auto"], default=os.getenv("LLM_PROVIDER", "auto"),
         help="LLM provider for localization (default: auto)",
     )
     parser.add_argument(
@@ -312,6 +312,25 @@ def localize_with_openai(script: str, target_lang: str) -> str:
     return localized
 
 
+def localize_with_xkiro(script: str, target_lang: str) -> str:
+    """Localize using xKiro's OpenAI-compatible chat API."""
+    from openai import OpenAI
+    key = os.getenv("XKIRO_API_KEY")
+    if not key:
+        raise RuntimeError("XKIRO_API_KEY is not configured")
+    model = os.getenv("XKIRO_MODEL", "minimax/minimax-m2.1")
+    client = OpenAI(api_key=key, base_url=os.getenv("XKIRO_BASE_URL", "https://api.xkiro.com/v1"), timeout=60)
+    lang = lang_name(target_lang)
+    print(f"[LLM] Calling xKiro {model} for {lang} localization...")
+    response = client.chat.completions.create(model=model, messages=[
+        {"role": "system", "content": f"You are a world-class {lang} copywriter who specializes in ad localization."},
+        {"role": "user", "content": LOCALIZATION_PROMPT.format(target_language=lang, source_script=script)},
+    ], temperature=0.7, max_tokens=2048)
+    localized = response.choices[0].message.content.strip()
+    print(f"[LLM] xKiro localized script received ({len(localized)} chars)")
+    return localized
+
+
 def localize_with_anthropic(script: str, target_lang: str) -> str:
     """Use Anthropic Claude to localize the script."""
     import anthropic
@@ -331,15 +350,24 @@ def localize_with_anthropic(script: str, target_lang: str) -> str:
 
 def localize_script(script: str, target_lang: str, llm_provider: str) -> str:
     """Translate and culturally localize the ad script. Falls back to demo if no keys."""
+    providers = []
+    if llm_provider == "xkiro" or (llm_provider == "auto" and os.getenv("XKIRO_API_KEY")):
+        providers.append(("xKiro", localize_with_xkiro))
     if llm_provider in ("openai", "auto") and os.getenv("OPENAI_API_KEY"):
-        return localize_with_openai(script, target_lang)
-    if llm_provider in ("anthropic", "auto") and os.getenv("ANTHROPIC_API_KEY"):
-        return localize_with_anthropic(script, target_lang)
-
-    # Demo fallback
+        providers.append(("OpenAI", localize_with_openai))
+    if llm_provider == "anthropic" and os.getenv("ANTHROPIC_API_KEY"):
+        providers.append(("Anthropic", localize_with_anthropic))
+    for name, fn in providers:
+        try:
+            return fn(script, target_lang)
+        except Exception as e:
+            print(f"[LLM] {name} failed: {e}. Trying fallback...")
+            if llm_provider != "auto":
+                raise
+    if llm_provider != "auto" and not providers:
+        raise RuntimeError(f"{llm_provider} provider is not configured")
     demo = get_demo_localization(target_lang)
-    print(f"[LLM] Using demo localization for {lang_name(target_lang)}.")
-    print("[LLM]    Set OPENAI_API_KEY or ANTHROPIC_API_KEY for live AI translation.")
+    print(f"[LLM] No LLM provider available; using demo localization for {lang_name(target_lang)}.")
     return demo
 
 
@@ -395,6 +423,24 @@ def generate_tts_elevenlabs(text: str, target_lang: str) -> bytes:
     return audio_bytes
 
 
+def generate_tts_edge(text: str, target_lang: str) -> bytes:
+    """Generate free natural speech with Microsoft Edge TTS."""
+    import asyncio
+    import edge_tts
+    voices = {"en": "en-US-JennyNeural", "es": "es-ES-ElviraNeural", "fr": "fr-FR-DeniseNeural", "de": "de-DE-KatjaNeural"}
+    voice = os.getenv("EDGE_TTS_VOICE", voices.get(target_lang, "en-US-JennyNeural"))
+    out = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+    out.close()
+    print(f"[TTS] Calling Edge TTS (voice={voice}, lang={target_lang})...")
+    async def run():
+        await edge_tts.Communicate(_clean_script_for_tts(text), voice).save(out.name)
+    asyncio.run(run())
+    data = Path(out.name).read_bytes()
+    Path(out.name).unlink(missing_ok=True)
+    print(f"[TTS] Edge audio generated ({len(data)} bytes)")
+    return data
+
+
 def generate_placeholder_audio(text: str, target_lang: str) -> bytes:
     """Generate a placeholder WAV using Python stdlib (modulated sine wave)."""
     print("[TTS] No API keys found. Generating placeholder audio (sine wave).")
@@ -428,16 +474,18 @@ def generate_placeholder_audio(text: str, target_lang: str) -> bytes:
 
 def generate_voiceover(text: str, target_lang: str, tts_provider: str) -> bytes:
     """Generate voice-over audio. Falls back to placeholder if no API keys."""
+    if tts_provider == "xkiro":
+        raise RuntimeError("xKiro TTS is unavailable: /v1/audio/speech returned 404")
+    providers = []
+    if tts_provider == "edge" or tts_provider == "auto":
+        providers.append(("Edge TTS", generate_tts_edge))
     if tts_provider in ("elevenlabs", "auto") and os.getenv("ELEVENLABS_API_KEY"):
-        try:
-            return generate_tts_elevenlabs(text, target_lang)
-        except Exception as e:
-            print(f"[TTS] ElevenLabs failed: {e}. Trying fallback...")
+        providers.append(("ElevenLabs", generate_tts_elevenlabs))
     if tts_provider in ("openai", "auto") and os.getenv("OPENAI_API_KEY"):
-        try:
-            return generate_tts_openai(text, target_lang)
-        except Exception as e:
-            print(f"[TTS] OpenAI TTS failed: {e}. Trying fallback...")
+        providers.append(("OpenAI", generate_tts_openai))
+    for name, fn in providers:
+        try: return fn(text, target_lang)
+        except Exception as e: print(f"[TTS] {name} failed: {e}. Trying fallback...")
     return generate_placeholder_audio(text, target_lang)
 
 
