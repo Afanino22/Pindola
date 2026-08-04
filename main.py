@@ -133,10 +133,10 @@ def create_demo_source_video(output_path: Path, script_text: str = "", duration:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     work = output_path.parent / "_lumaskin_assets"
     work.mkdir(exist_ok=True)
+    # Generate amber serum bottle asset
     bottle = work / "bottle.png"
     if not bottle.exists():
         im = Image.new("RGBA", (420, 760), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
-        # amber bottle body, neck, dropper and highlights
         d.rounded_rectangle((85, 190, 335, 685), radius=42, fill=(187, 106, 37, 255), outline=(246, 204, 118, 255), width=7)
         d.rectangle((130, 125, 290, 205), fill=(205, 145, 65, 255), outline=(250, 220, 145, 255), width=5)
         d.rounded_rectangle((165, 45, 255, 145), radius=28, fill=(33, 26, 38, 255), outline=(228, 185, 94, 255), width=5)
@@ -146,28 +146,118 @@ def create_demo_source_video(output_path: Path, script_text: str = "", duration:
         d.text((153, 430), "SKIN", fill=(75, 43, 35, 255))
         d.line((112, 235, 112, 620), fill=(255, 221, 156, 150), width=14)
         im.save(bottle)
+
     font_b = '/home/team/shared/demo-video/assets/Poppins-Bold.ttf'
     font_s = '/home/team/shared/demo-video/assets/Poppins-SemiBold.ttf'
-    # Separate scene renders keep expressions readable and make xfade deterministic.
-    scenes = [work / f'scene{i}.mp4' for i in range(1,5)]
-    common = ['ffmpeg', '-y', '-f', 'lavfi', '-i']
-    filters = [
-      # hook: drifting purple field, sweep, particles and kinetic words
-      ("color=c=0x120b22:s=1920x1080:r=30:d=5,drawbox=x='-500+500*t':y=0:w=520:h=1080:color=0x9b64d8@0.12:t=fill,drawbox=x='mod(300*t\\,1920)':y=130:w=4:h=4:color=white@0.8:t=fill,drawbox=x='mod(800*t+300\\,1920)':y=360:w=7:h=7:color=0xf3c98b@0.7:t=fill,drawbox=x='mod(1200*t+700\\,1920)':y=760:w=5:h=5:color=white@0.65:t=fill,drawtext=fontfile=%s:text='TIRED':fontsize=170:fontcolor=white:x='(w-text_w)/2-500+500*t':y=290:enable='between(t,0.2,2.8)':alpha='min(1,(t-0.2)*3)*min(1,(3.2-t)*3)',drawtext=fontfile=%s:text='PROMISES':fontsize=126:fontcolor=0xf0c58a:x='(w-text_w)/2+500-500*t':y=465:enable='between(t,1.7,4.2)':alpha='min(1,(t-1.7)*3)*min(1,(4.7-t)*3)',drawtext=fontfile=%s:text='NOTHING.':fontsize=142:fontcolor=0xe58d9d:x='(w-text_w)/2':y=650:enable='between(t,3.1,5)':alpha='min(1,(t-3.1)*4)' ,format=yuv420p" % (font_b,font_b,font_b)),
-      # problem: warm cards drift and strike through
-      ("color=c=0x20151b:s=1920x1080:r=30:d=7,drawbox=x='220+30*sin(t)':y=170:w=1480:h=720:color=0x8f5b45@0.18:t=fill,drawbox=x='350+80*sin(t*0.8)':y=280:w=1220:h=120:color=0xf3c98b@0.12:t=fill,drawbox=x='420+60*sin(t*0.7)':y=475:w=1080:h=120:color=0xf3c98b@0.12:t=fill,drawbox=x='300+90*sin(t*0.6)':y=670:w=1300:h=120:color=0xf3c98b@0.12:t=fill,drawtext=fontfile=%s:text='12-STEP ROUTINES':fontsize=62:fontcolor=white:x='420+60*sin(t*0.7)':y=308,drawtext=fontfile=%s:text='$200 CREAMS':fontsize=62:fontcolor=white:x='520+45*sin(t*0.8)':y=503,drawtext=fontfile=%s:text='VIRAL HACKS':fontsize=62:fontcolor=white:x='520+70*sin(t*0.6)':y=698,drawbox=x=380:y=335:w='min(1300\\,1300*(t/2))':h=9:color=0xe06b70:t=fill,drawbox=x=460:y=530:w='min(1100\\,1100*((t-1)/2))':h=9:color=0xe06b70:t=fill,drawbox=x=430:y=725:w='min(1200\\,1200*((t-2)/2))':h=9:color=0xe06b70:t=fill,drawtext=fontfile=%s:text='✕':fontsize=110:fontcolor=0xe06b70:x=1510:y=270+80*sin(t):alpha=.8,format=yuv420p" % (font_s,font_s,font_s,font_b)),
-      ("color=c=0xfffbf4:s=1920x1080:r=30:d=10,drawbox=x='960+700*sin(t*0.7)':y=0:w=22:h=1080:color=0xe8b85c@0.10:t=fill,drawtext=fontfile=%s:text='LUMASKIN':fontsize=54:fontcolor=0x9c682f:x=90:y=80,drawtext=fontfile=%s:text='50,000 WOMEN':fontsize=104:fontcolor=0x3a2630:x='80+20*sin(t)':y=230,drawtext=fontfile=%s:text='Clinically Proven':fontsize=58:fontcolor=0x6e4d3e:x=90:y=410,drawtext=fontfile=%s:text='Results in 7 Days':fontsize=58:fontcolor=0x9b682f:x=90:y=515,drawtext=fontfile=%s:text='No false promises':fontsize=58:fontcolor=0x9b682f:x=90:y=620,drawbox=x='1300+40*sin(t)':y=300:w=260:h=430:color=0xb86a25@0.95:t=fill,drawbox=x='1370+40*sin(t)':y=235:w=120:h=80:color=0xd39a4d:t=fill,drawbox=x='1410+40*sin(t)':y=175:w=40:h=70:color=0x211a26:t=fill,format=yuv420p" % (font_s,font_b,font_s,font_s,font_s)),
-      # CTA: animated badge/button and pulse
-      ("color=c=0x25132f:s=1920x1080:r=30:d=8,drawbox=x='0':y='0':w=1920:h=1080:color=0x6f3f80@'0.18+0.12*sin(t*2)':t=fill,drawtext=fontfile=%s:text='LUMASKIN':fontsize=54:fontcolor=0xf4cf98:x=90:y=80,drawtext=fontfile=%s:text='30 DAY RISK FREE':fontsize=130:fontcolor=white:x='(w-text_w)/2':y=285+18*sin(t*1.5),drawtext=fontfile=%s:text='Money Back Guarantee':fontsize=58:fontcolor=0xf4cf98:x='(w-text_w)/2':y=470,drawbox=x=650:y=620:w=620:h=150:color=0xf0b85d@'0.75+0.2*sin(t*3)':t=fill,drawtext=fontfile=%s:text='LINK IN BIO  →':fontsize=62:fontcolor=0x321b32:x='(w-text_w)/2':y=660,drawtext=fontfile=%s:text='Your skin is waiting.':fontsize=42:fontcolor=0xffffff@0.75:x='(w-text_w)/2':y=865,format=yuv420p" % (font_b,font_b,font_s,font_b,font_s))]
-    for i, (filt, path) in enumerate(zip(filters, scenes), 1):
-        cmd = common + [filt] + ['-vf', 'format=yuv420p', '-c:v', 'libx264', '-preset', 'medium', '-crf', '23', '-an', '-t', str([5,7,10,8][i-1]), str(path)]
-        r=subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode: raise RuntimeError(f'FFmpeg scene {i} failed: {r.stderr[-1000:]}')
-    fc='[0:v][1:v]xfade=transition=fade:duration=0.6:offset=4.4[v1];[v1][2:v]xfade=transition=fade:duration=0.6:offset=10.8[v2];[v2][3:v]xfade=transition=fade:duration=0.6:offset=20.2[v]'
-    cmd=['ffmpeg','-y'] + sum((['-i',str(x)] for x in scenes), []) + ['-filter_complex',fc,'-map','[v]','-t','30','-r','30','-s','1920x1080','-c:v','libx264','-preset','medium','-crf','23','-pix_fmt','yuv420p','-an',str(output_path)]
-    r=subprocess.run(cmd,capture_output=True,text=True)
-    if r.returncode: raise RuntimeError(f'FFmpeg concat failed: {r.stderr[-1000:]}')
-    print(f'[VIDEO] Demo source created: {output_path} ({output_path.stat().st_size/1048576:.1f} MB)')
+    scenes = [work / f'scene{i}.mp4' for i in range(1, 5)]
+    durations = [5, 7, 10, 8]
+
+    # Build each scene as a lavfi filtergraph string.
+    # ffmpeg -f lavfi -i "<filtergraph>" -t <dur> -an sceneN.mp4
+    # IMPORTANT: do NOT wrap numeric expressions in single quotes — only text= values.
+    scene_filters = [
+        # Scene 1 (0–5s): HOOK — dark purple, light sweep, particles, kinetic typography
+        (
+            "color=c=0x120b22:s=1920x1080:r=30:d=5,"
+            "drawbox=x=-500+500*t:y=0:w=520:h=1080:color=0x9b64d8@0.12:t=fill,"
+            "drawbox=x=mod(300*t\\,1920):y=130:w=4:h=4:color=white@0.8:t=fill,"
+            "drawbox=x=mod(800*t+300\\,1920):y=360:w=7:h=7:color=0xf3c98b@0.7:t=fill,"
+            "drawbox=x=mod(1200*t+700\\,1920):y=760:w=5:h=5:color=white@0.65:t=fill,"
+            f"drawtext=fontfile={font_b}:text='TIRED':fontsize=170:fontcolor=white:"
+            "x=(w-text_w)/2-500+500*t:y=290:enable='between(t,0.2,2.8)':"
+            "alpha=min(1\\,(t-0.2)*3)*min(1\\,(3.2-t)*3),"
+            f"drawtext=fontfile={font_b}:text='PROMISES':fontsize=126:fontcolor=0xf0c58a:"
+            "x=(w-text_w)/2+500-500*t:y=465:enable='between(t,1.7,4.2)':"
+            "alpha=min(1\\,(t-1.7)*3)*min(1\\,(4.7-t)*3),"
+            f"drawtext=fontfile={font_b}:text='NOTHING.':fontsize=142:fontcolor=0xe58d9d:"
+            "x=(w-text_w)/2:y=650:enable='between(t,3.1,5)':alpha=min(1\\,(t-3.1)*4),"
+            "format=yuv420p"
+        ),
+        # Scene 2 (5–12s): PROBLEM — warm bronze, floating cards, strike-throughs
+        (
+            "color=c=0x20151b:s=1920x1080:r=30:d=7,"
+            "drawbox=x=220+30*sin(t):y=170:w=1480:h=720:color=0x8f5b45@0.18:t=fill,"
+            "drawbox=x=350+80*sin(t*0.8):y=280:w=1220:h=120:color=0xf3c98b@0.12:t=fill,"
+            "drawbox=x=420+60*sin(t*0.7):y=475:w=1080:h=120:color=0xf3c98b@0.12:t=fill,"
+            "drawbox=x=300+90*sin(t*0.6):y=670:w=1300:h=120:color=0xf3c98b@0.12:t=fill,"
+            f"drawtext=fontfile={font_s}:text='12-STEP ROUTINES':fontsize=62:fontcolor=white:"
+            "x=420+60*sin(t*0.7):y=308,"
+            f"drawtext=fontfile={font_s}:text='$200 CREAMS':fontsize=62:fontcolor=white:"
+            "x=520+45*sin(t*0.8):y=503,"
+            f"drawtext=fontfile={font_s}:text='VIRAL HACKS':fontsize=62:fontcolor=white:"
+            "x=520+70*sin(t*0.6):y=698,"
+            "drawbox=x=380:y=335:w=min(1300\\,1300*(t/2)):h=9:color=0xe06b70:t=fill,"
+            "drawbox=x=460:y=530:w=min(1100\\,1100*((t-1)/2)):h=9:color=0xe06b70:t=fill,"
+            "drawbox=x=430:y=725:w=min(1200\\,1200*((t-2)/2)):h=9:color=0xe06b70:t=fill,"
+            f"drawtext=fontfile={font_b}:text='✕':fontsize=110:fontcolor=0xe06b70:"
+            "x=1510:y=270+80*sin(t):alpha=0.8,"
+            "format=yuv420p"
+        ),
+        # Scene 3 (12–22s): SOLUTION — bright white/gold, bottle, count-up
+        (
+            "color=c=0xfffbf4:s=1920x1080:r=30:d=10,"
+            "drawbox=x=960+700*sin(t*0.7):y=0:w=22:h=1080:color=0xe8b85c@0.10:t=fill,"
+            f"drawtext=fontfile={font_s}:text='LUMASKIN':fontsize=54:fontcolor=0x9c682f:x=90:y=80,"
+            f"drawtext=fontfile={font_b}:text='50,000 WOMEN':fontsize=104:fontcolor=0x3a2630:"
+            "x=80+20*sin(t):y=230:alpha=min(1\\,t*2),"
+            f"drawtext=fontfile={font_s}:text='Clinically Proven':fontsize=58:fontcolor=0x6e4d3e:"
+            "x=90:y=410:enable='between(t,3,10)',"
+            f"drawtext=fontfile={font_s}:text='Results in 7 Days':fontsize=58:fontcolor=0x9b682f:"
+            "x=90:y=515:enable='between(t,4,10)',"
+            f"drawtext=fontfile={font_s}:text='No false promises':fontsize=58:fontcolor=0x9b682f:"
+            "x=90:y=620:enable='between(t,5,10)',"
+            "drawbox=x=1300+40*sin(t):y=300:w=260:h=430:color=0xb86a25@0.95:t=fill,"
+            "drawbox=x=1370+40*sin(t):y=235:w=120:h=80:color=0xd39a4d:t=fill,"
+            "drawbox=x=1410+40*sin(t):y=175:w=40:h=70:color=0x211a26:t=fill,"
+            "format=yuv420p"
+        ),
+        # Scene 4 (22–30s): CTA — premium gradient, badge, button, glow pulse
+        (
+            "color=c=0x25132f:s=1920x1080:r=30:d=8,"
+            "drawbox=x=0:y=0:w=1920:h=1080:color=0x6f3f80@0.22:t=fill,"
+            f"drawtext=fontfile={font_b}:text='LUMASKIN':fontsize=54:fontcolor=0xf4cf98:x=90:y=80,"
+            f"drawtext=fontfile={font_b}:text='30 DAY RISK FREE':fontsize=130:fontcolor=white:"
+            "x=(w-text_w)/2:y=285+18*sin(t*1.5),"
+            f"drawtext=fontfile={font_s}:text='Money Back Guarantee':fontsize=58:fontcolor=0xf4cf98:"
+            "x=(w-text_w)/2:y=470,"
+            "drawbox=x=650:y=620:w=620:h=150:color=0xf0b85d@0.85:t=fill,"
+            f"drawtext=fontfile={font_b}:text='LINK IN BIO  →':fontsize=62:fontcolor=0x321b32:"
+            "x=(w-text_w)/2:y=660,"
+            f"drawtext=fontfile={font_s}:text='Your skin is waiting.':fontsize=42:fontcolor=0xffffff@0.75:"
+            "x=(w-text_w)/2:y=865,"
+            "format=yuv420p"
+        ),
+    ]
+
+    for i, (filt, path) in enumerate(zip(scene_filters, scenes), 1):
+        dur = durations[i - 1]
+        cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", filt,
+               "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+               "-an", "-t", str(dur), str(path)]
+        print(f"[VIDEO] Rendering scene {i}/{len(scenes)} ({dur}s)...")
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode:
+            raise RuntimeError(f"FFmpeg scene {i} failed:\n{r.stderr[-1200:]}")
+
+    # Assemble with crossfades
+    fc = (
+        "[0:v][1:v]xfade=transition=fade:duration=0.6:offset=4.4[v1];"
+        "[v1][2:v]xfade=transition=fade:duration=0.6:offset=10.8[v2];"
+        "[v2][3:v]xfade=transition=fade:duration=0.6:offset=20.2[v]"
+    )
+    cmd = ["ffmpeg", "-y"] + sum((["-i", str(x)] for x in scenes), []) + [
+        "-filter_complex", fc, "-map", "[v]",
+        "-t", "30", "-r", "30", "-s", "1920x1080",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+        "-pix_fmt", "yuv420p", "-an", str(output_path)
+    ]
+    print("[VIDEO] Assembling final video with xfade transitions...")
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode:
+        raise RuntimeError(f"FFmpeg concat failed:\n{r.stderr[-1200:]}")
+
+    size_mb = output_path.stat().st_size / 1048576
+    print(f"[VIDEO] Demo source created: {output_path} ({size_mb:.1f} MB)")
     return output_path
 
 
