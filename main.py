@@ -95,6 +95,7 @@ def parse_args():
         "--demo", action="store_true",
         help="Run demo mode: localize to en, es, fr, de using placeholder video",
     )
+    parser.add_argument("--no-tts", action="store_true", help="Demo visuals and localized scripts only; skip TTS/audio merge.")
     parser.add_argument(
         "--script-only", action="store_true",
         help="Script-only mode: skip video input, just localize text + generate audio",
@@ -125,97 +126,50 @@ def lang_name(code: str) -> str:
 # ---------------------------------------------------------------------------
 # Step 0: Create placeholder demo video
 # ---------------------------------------------------------------------------
-def create_placeholder_video(output_path: Path, script_text: str, duration: int = 30):
-    """
-    Create a simple placeholder video: a gradient background with
-    the script text overlaid as subtitles. Uses only ffmpeg.
-    """
-    import textwrap
-
-    print(f"[VIDEO] Creating placeholder video ({duration}s)...")
-
-    # Create a clean text overlay from the script
-    clean_lines = []
-    for line in script_text.strip().split("\n"):
-        line = line.strip()
-        if not line or line.startswith("TITLE:") or line.startswith("LANGUAGE:") or \
-           line.startswith("TARGET_PLATFORM:") or line == "---":
-            continue
-        # Remove markers for display but keep the text
-        line = re.sub(r'\[.*?\]', '', line).strip()
-        line = line.strip('"')
-        if line:
-            wrapped = textwrap.wrap(line, width=50)
-            clean_lines.extend(wrapped)
-
-    if not clean_lines:
-        clean_lines = ["LumaSkin - AI Localization Demo"]
-
-    # Calculate time per subtitle chunk
-    chars_per_sec = len(" ".join(clean_lines)) / duration if duration > 0 else 10
-    subtitle_entries = []
-    time_pos = 0.5
-    for line in clean_lines:
-        line_duration = max(1.5, len(line) / chars_per_sec)
-        subtitle_entries.append((time_pos, time_pos + line_duration, line))
-        time_pos += line_duration
-
-    # Build drawtext filter
-    font_size = 24
-    filters = []
-    for i, (start, end, text) in enumerate(subtitle_entries):
-        # Escape special chars for ffmpeg
-        safe_text = text.replace("'", "'\\\\''").replace(":", "\\\\:").replace("%", "\\\\%")
-        filters.append(
-            f"drawtext=text='{safe_text}':fontsize={font_size}:fontcolor=white:"
-            f"x=(w-text_w)/2:y=(h-text_h)/2:"
-            f"enable='between(t,{start},{end})':"
-            f"box=1:boxcolor=black@0.5:boxborderw=10"
-        )
-
-    filter_complex = ",".join(filters)
-
-    cmd = [
-        "ffmpeg", "-y",
-        "-f", "lavfi", "-i", f"color=c=0x1a1a2e:s=1080x1920:d={duration}:r=30",
-        "-f", "lavfi", "-i", f"color=c=0x6c5ce7:s=1080x1920:d={duration}:r=30",
-        "-filter_complex",
-        f"[0:v][1:v]blend=all_mode=overlay:all_opacity=0.3[bg];"
-        f"[bg]{filter_complex}[out]",
-        "-map", "[out]",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-        "-pix_fmt", "yuv420p",
-        "-an",
-        str(output_path),
-    ]
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"[VIDEO] ffmpeg warning (may still be OK): {result.stderr[:200]}")
-
-    # Check file was created
-    if output_path.exists() and output_path.stat().st_size > 0:
-        file_size_mb = output_path.stat().st_size / (1024 * 1024)
-        print(f"[VIDEO] Placeholder video created: {output_path} ({file_size_mb:.1f} MB)")
-        return output_path
-    else:
-        # Simpler fallback: just a solid color
-        print("[VIDEO] Retrying with simpler approach...")
-        cmd2 = [
-            "ffmpeg", "-y",
-            "-f", "lavfi", "-i", f"color=c=0x6c5ce7:s=1080x1920:d={duration}:r=30",
-            "-vf", f"drawtext=text='LumaSkin':fontsize=48:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2-40:box=1:boxcolor=black@0.3:boxborderw=15",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-            "-pix_fmt", "yuv420p", "-an",
-            str(output_path),
-        ]
-        subprocess.run(cmd2, capture_output=True)
-        if output_path.exists():
-            print(f"[VIDEO] Placeholder video created (simple): {output_path}")
-            return output_path
-        else:
-            print("[VIDEO] WARNING: Could not create placeholder video. Continuing without video.")
-            return None
+def create_demo_source_video(output_path: Path, script_text: str = "", duration: int = 30):
+    """Render a polished 30-second LumaSkin motion-graphics ad with FFmpeg."""
+    import subprocess
+    from PIL import Image, ImageDraw
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    work = output_path.parent / "_lumaskin_assets"
+    work.mkdir(exist_ok=True)
+    bottle = work / "bottle.png"
+    if not bottle.exists():
+        im = Image.new("RGBA", (420, 760), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
+        # amber bottle body, neck, dropper and highlights
+        d.rounded_rectangle((85, 190, 335, 685), radius=42, fill=(187, 106, 37, 255), outline=(246, 204, 118, 255), width=7)
+        d.rectangle((130, 125, 290, 205), fill=(205, 145, 65, 255), outline=(250, 220, 145, 255), width=5)
+        d.rounded_rectangle((165, 45, 255, 145), radius=28, fill=(33, 26, 38, 255), outline=(228, 185, 94, 255), width=5)
+        d.ellipse((205, 5, 215, 55), fill=(245, 205, 110, 230))
+        d.rounded_rectangle((124, 350, 296, 520), radius=16, fill=(255, 242, 211, 235))
+        d.text((151, 390), "LUMA", fill=(75, 43, 35, 255))
+        d.text((153, 430), "SKIN", fill=(75, 43, 35, 255))
+        d.line((112, 235, 112, 620), fill=(255, 221, 156, 150), width=14)
+        im.save(bottle)
+    font_b = '/home/team/shared/demo-video/assets/Poppins-Bold.ttf'
+    font_s = '/home/team/shared/demo-video/assets/Poppins-SemiBold.ttf'
+    def esc(t): return t.replace("'", "\\'").replace(':', '\\:')
+    # Separate scene renders keep expressions readable and make xfade deterministic.
+    scenes = [work / f'scene{i}.mp4' for i in range(1,5)]
+    common = ['ffmpeg', '-y', '-f', 'lavfi', '-i']
+    filters = [
+      # hook: drifting purple field, sweep, particles and kinetic words
+      ("color=c=0x120b22:s=1920x1080:r=30:d=5,drawbox=x='-500+500*t':y=0:w=520:h=1080:color=0x9b64d8@0.12:t=fill,drawbox=x='mod(300*t\\,1920)':y=130:w=4:h=4:color=white@0.8:t=fill,drawbox=x='mod(800*t+300\\,1920)':y=360:w=7:h=7:color=0xf3c98b@0.7:t=fill,drawbox=x='mod(1200*t+700\\,1920)':y=760:w=5:h=5:color=white@0.65:t=fill,drawtext=fontfile=%s:text='TIRED':fontsize=170:fontcolor=white:x='(w-text_w)/2-500+500*t':y=290:enable='between(t,0.2,2.8)':alpha='min(1,(t-0.2)*3)*min(1,(3.2-t)*3)',drawtext=fontfile=%s:text='PROMISES':fontsize=126:fontcolor=0xf0c58a:x='(w-text_w)/2+500-500*t':y=465:enable='between(t,1.7,4.2)':alpha='min(1,(t-1.7)*3)*min(1,(4.7-t)*3)',drawtext=fontfile=%s:text='NOTHING.':fontsize=142:fontcolor=0xe58d9d:x='(w-text_w)/2':y=650:enable='between(t,3.1,5)':alpha='min(1,(t-3.1)*4)' ,format=yuv420p" % (font_b,font_b,font_b)),
+      # problem: warm cards drift and strike through
+      ("color=c=0x20151b:s=1920x1080:r=30:d=7,drawbox=x='220+30*sin(t)':y=170:w=1480:h=720:color=0x8f5b45@0.18:t=fill,drawbox=x='350+80*sin(t*0.8)':y=280:w=1220:h=120:color=0xf3c98b@0.12:t=fill,drawbox=x='420+60*sin(t*0.7)':y=475:w=1080:h=120:color=0xf3c98b@0.12:t=fill,drawbox=x='300+90*sin(t*0.6)':y=670:w=1300:h=120:color=0xf3c98b@0.12:t=fill,drawtext=fontfile=%s:text='12-STEP ROUTINES':fontsize=62:fontcolor=white:x='420+60*sin(t*0.7)':y=308,drawtext=fontfile=%s:text='$200 CREAMS':fontsize=62:fontcolor=white:x='520+45*sin(t*0.8)':y=503,drawtext=fontfile=%s:text='VIRAL HACKS':fontsize=62:fontcolor=white:x='520+70*sin(t*0.6)':y=698,drawbox=x=380:y=335:w='min(1300\\,1300*(t/2))':h=9:color=0xe06b70:t=fill,drawbox=x=460:y=530:w='min(1100\\,1100*((t-1)/2))':h=9:color=0xe06b70:t=fill,drawbox=x=430:y=725:w='min(1200\\,1200*((t-2)/2))':h=9:color=0xe06b70:t=fill,drawtext=fontfile=%s:text='✕':fontsize=110:fontcolor=0xe06b70:x=1510:y=270+80*sin(t):alpha=.8,format=yuv420p" % (font_s,font_s,font_s,font_b)),
+      ("color=c=0xfffbf4:s=1920x1080:r=30:d=10,drawbox=x='960+700*sin(t*0.7)':y=0:w=22:h=1080:color=0xe8b85c@0.10:t=fill,drawtext=fontfile=%s:text='LUMASKIN':fontsize=54:fontcolor=0x9c682f:x=90:y=80,drawtext=fontfile=%s:text='50,000 WOMEN':fontsize=104:fontcolor=0x3a2630:x='80+20*sin(t)':y=230,drawtext=fontfile=%s:text='Clinically Proven':fontsize=58:fontcolor=0x6e4d3e:x=90:y=410,drawtext=fontfile=%s:text='Results in 7 Days':fontsize=58:fontcolor=0x9b682f:x=90:y=515,drawtext=fontfile=%s:text='No false promises':fontsize=58:fontcolor=0x9b682f:x=90:y=620,drawbox=x='1300+40*sin(t)':y=300:w=260:h=430:color=0xb86a25@0.95:t=fill,drawbox=x='1370+40*sin(t)':y=235:w=120:h=80:color=0xd39a4d:t=fill,drawbox=x='1410+40*sin(t)':y=175:w=40:h=70:color=0x211a26:t=fill,format=yuv420p" % (font_s,font_b,font_s,font_s,font_s)),
+      # CTA: animated badge/button and pulse
+      ("color=c=0x25132f:s=1920x1080:r=30:d=8,drawbox=x='0':y='0':w=1920:h=1080:color=0x6f3f80@'0.18+0.12*sin(t*2)':t=fill,drawtext=fontfile=%s:text='LUMASKIN':fontsize=54:fontcolor=0xf4cf98:x=90:y=80,drawtext=fontfile=%s:text='30 DAY RISK FREE':fontsize=130:fontcolor=white:x='(w-text_w)/2':y=285+18*sin(t*1.5),drawtext=fontfile=%s:text='Money Back Guarantee':fontsize=58:fontcolor=0xf4cf98:x='(w-text_w)/2':y=470,drawbox=x=650:y=620:w=620:h=150:color=0xf0b85d@'0.75+0.2*sin(t*3)':t=fill,drawtext=fontfile=%s:text='LINK IN BIO  →':fontsize=62:fontcolor=0x321b32:x='(w-text_w)/2':y=660,drawtext=fontfile=%s:text='Your skin is waiting.':fontsize=42:fontcolor=0xffffff@0.75:x='(w-text_w)/2':y=865,format=yuv420p" % (font_b,font_b,font_s,font_b,font_s))]
+    for i, (filt, path) in enumerate(zip(filters, scenes), 1):
+        cmd = common + [filt] + ['-vf', 'format=yuv420p', '-c:v', 'libx264', '-preset', 'medium', '-crf', '23', '-an', '-t', str([5,7,10,8][i-1]), str(path)]
+        r=subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode: raise RuntimeError(f'FFmpeg scene {i} failed: {r.stderr[-1000:]}')
+    fc='[0:v][1:v]xfade=transition=fade:duration=0.6:offset=4.4[v1];[v1][2:v]xfade=transition=fade:duration=0.6:offset=10.8[v2];[v2][3:v]xfade=transition=fade:duration=0.6:offset=20.2[v]'
+    cmd=['ffmpeg','-y'] + sum((['-i',str(x)] for x in scenes), []) + ['-filter_complex',fc,'-map','[v]','-t','30','-r','30','-s','1920x1080','-c:v','libx264','-preset','medium','-crf','23','-pix_fmt','yuv420p','-an',str(output_path)]
+    r=subprocess.run(cmd,capture_output=True,text=True)
+    if r.returncode: raise RuntimeError(f'FFmpeg concat failed: {r.stderr[-1000:]}')
+    print(f'[VIDEO] Demo source created: {output_path} ({output_path.stat().st_size/1048576:.1f} MB)')
+    return output_path
 
 
 # ---------------------------------------------------------------------------
@@ -771,7 +725,7 @@ def process_one_language(
 # ---------------------------------------------------------------------------
 # Demo mode: batch process all 4 languages
 # ---------------------------------------------------------------------------
-def run_demo(output_base: Path, llm_provider: str, tts_provider: str):
+def run_demo(output_base: Path, llm_provider: str, tts_provider: str, no_tts: bool = False):
     """Run the full demo: create placeholder video, localize to all 4 languages."""
     print("\n" + "="*60)
     print("  PINDOLA DEMO MODE")
@@ -784,23 +738,26 @@ def run_demo(output_base: Path, llm_provider: str, tts_provider: str):
     source_script = SAMPLE_SCRIPT.read_text(encoding="utf-8").strip()
 
     # Create placeholder video (30s ad)
-    placeholder_video = output_base / "placeholder_source.mp4"
-    create_placeholder_video(placeholder_video, source_script, duration=30)
+    placeholder_video = output_base / "lumaskin_source.mp4"
+    create_demo_source_video(placeholder_video, source_script, duration=30)
 
     demo_langs = ["en", "es", "fr", "de"]
     results = {}
 
     for lang in demo_langs:
         lang_dir = output_base / lang
-        result = process_one_language(
-            video_path=placeholder_video,
-            target_lang=lang,
-            output_dir=lang_dir,
-            source_script=source_script,
-            llm_provider=llm_provider,
-            tts_provider=tts_provider,
-            keep_audio=False,
-        )
+        if no_tts:
+            localized = localize_script(source_script, lang, llm_provider)
+            lang_dir.mkdir(parents=True, exist_ok=True)
+            (lang_dir / f"script_{lang}.txt").write_text(localized, encoding="utf-8")
+            result = {"lang": lang, "output_dir": lang_dir, "localized_script": localized, "video_path": str(placeholder_video)}
+            print(f"[NO-TTS] Saved localized script for {lang}")
+        else:
+            result = process_one_language(
+                video_path=placeholder_video, target_lang=lang, output_dir=lang_dir,
+                source_script=source_script, llm_provider=llm_provider,
+                tts_provider=tts_provider, keep_audio=False,
+            )
         results[lang] = result
 
     # Summary
@@ -847,6 +804,7 @@ def main():
             output_base=args.output_dir or DEMO_OUTPUT_DIR,
             llm_provider=args.llm,
             tts_provider=args.tts,
+            no_tts=args.no_tts,
         )
         return
 
