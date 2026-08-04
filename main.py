@@ -148,7 +148,6 @@ def create_demo_source_video(output_path: Path, script_text: str = "", duration:
         im.save(bottle)
     font_b = '/home/team/shared/demo-video/assets/Poppins-Bold.ttf'
     font_s = '/home/team/shared/demo-video/assets/Poppins-SemiBold.ttf'
-    def esc(t): return t.replace("'", "\\'").replace(':', '\\:')
     # Separate scene renders keep expressions readable and make xfade deterministic.
     scenes = [work / f'scene{i}.mp4' for i in range(1,5)]
     common = ['ffmpeg', '-y', '-f', 'lavfi', '-i']
@@ -819,7 +818,7 @@ def main():
             output_dir=output_dir,
             source_script=source_script,
             llm_provider=args.llm,
-            tts_provider=args.tts,
+            tts_provider=args.tts, no_tts=args.no_tts,
         )
         print("\n[DONE] Script-only mode complete.")
         return
