@@ -57,6 +57,7 @@ except ImportError:
 
 # Import demo localizations
 from demo_localizations import get_demo_localization, LANGUAGE_MAP as DEMO_LANG_MAP
+from sample_mode import localize_variants, write_report, apply_watermark, make_side_by_side, VARIANTS, VARIANT_LABELS
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +105,8 @@ def parse_args():
         "--keep-audio", action="store_true",
         help="Keep the extracted original audio file",
     )
+    parser.add_argument("--sample-mode", action="store_true", help="Create Brand Match, Performance, and Premium sample package")
+    parser.add_argument("--watermark", action="store_true", help="Overlay semi-transparent PINDOLA SAMPLE on sample videos")
     return parser.parse_args()
 
 
@@ -882,10 +885,61 @@ def run_demo(output_base: Path, llm_provider: str, tts_provider: str, no_tts: bo
 
 
 # ---------------------------------------------------------------------------
+# Sample Mode: three variants + report + comparison package
+# ---------------------------------------------------------------------------
+def run_sample_mode(video_path, target_lang, output_dir, llm_provider="auto", tts_provider="auto", watermark=False, source_script=None):
+    """Build a prospect-ready package without changing the standard pipeline."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if video_path is None or not video_path.exists():
+        video_path = output_dir.parent / "lumaskin_source.mp4"
+        if not video_path.exists(): create_demo_source_video(video_path, source_script or SAMPLE_SCRIPT.read_text(encoding="utf-8"))
+    if source_script is None:
+        try:
+            audio_path = extract_audio(video_path, output_dir)
+            source_script, segments = transcribe_audio(audio_path, return_segments=True)
+        except Exception:
+            source_script, segments = SAMPLE_SCRIPT.read_text(encoding="utf-8").strip(), []
+    else:
+        segments = []
+    variants = localize_variants(source_script, target_lang, llm_provider)
+    for key in VARIANTS:
+        vdir = output_dir / key; vdir.mkdir(parents=True, exist_ok=True)
+        script = variants[key]["script"]
+        (vdir / f"script_{target_lang}.txt").write_text(script, encoding="utf-8")
+        audio = generate_voiceover(script, target_lang, tts_provider)
+        ext = ".wav" if audio[:4] == b"RIFF" else ".mp3"
+        (vdir / f"voiceover_{target_lang}{ext}").write_bytes(audio)
+        (vdir / f"localized_{target_lang}.srt").write_text(generate_srt(script, segments), encoding="utf-8")
+        raw = vdir / f"{key}_{target_lang}.mp4"
+        combine_video_audio(video_path, audio, raw, target_lang, "16x9")
+        final = vdir / f"{key}_{target_lang}_sample.mp4"
+        if watermark: apply_watermark(raw, final); raw.unlink(missing_ok=True)
+        else: raw.rename(final)
+    report = write_report(output_dir, source_script, variants, lang_name(target_lang))
+    side = output_dir / f"side_by_side_{target_lang}.mp4"
+    make_side_by_side(video_path, output_dir / "brand_match" / f"brand_match_{target_lang}_sample.mp4", side)
+    if watermark:
+        marked = output_dir / f"side_by_side_{target_lang}_watermarked.mp4"; apply_watermark(side, marked); side.unlink(missing_ok=True); side = marked
+    (output_dir / "variants.json").write_text(json.dumps(variants, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"[SAMPLE] Complete: {output_dir} (report: {report}, comparison: {side})")
+    return {"output_dir": str(output_dir), "report": str(report), "side_by_side": str(side), "variants": list(VARIANTS)}
+
+
+# ---------------------------------------------------------------------------
 # Main orchestrator
 # ---------------------------------------------------------------------------
 def main():
     args = parse_args()
+
+    # Sample mode is intentionally handled before the legacy demo/batch paths.
+    if args.sample_mode:
+        video_path = args.input if args.input and args.input.exists() else None
+        source_script = SAMPLE_SCRIPT.read_text(encoding="utf-8").strip() if args.demo and not args.input else None
+        if args.script and args.script.exists():
+            source_script = args.script.read_text(encoding="utf-8").strip()
+        out = args.output_dir or (DEMO_OUTPUT_DIR / args.target_lang if args.demo else OUTPUT_DIR / "samples" / args.target_lang)
+        run_sample_mode(video_path, args.target_lang, out, args.llm, args.tts, args.watermark, source_script)
+        return
 
     # Demo mode
     if args.demo:
