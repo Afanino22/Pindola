@@ -9,7 +9,44 @@ VARIANT_PROMPT = '''You are a native {language} advertising copywriter. Return O
 SOURCE SCRIPT:
 {source}'''
 
+MIN_CONFIDENCE = 0.75
+
+def validate_variants(variants, source, target_lang):
+    """Return per-variant validation errors; never infer language from mere text difference."""
+    errors = {}
+    target = target_lang.lower().split('-')[0]
+    words = {
+        'es': {'el','la','los','las','de','que','para','con','una','hoy','envío','zapatillas'},
+        'fr': {'le','la','les','des','de','pour','avec','une','aujourd','livraison','chaussures'},
+        'de': {'der','die','das','den','und','für','mit','eine','heute','versand','schuhe'},
+    }.get(target, set())
+    english = {'the','and','our','new','for','with','today','get','free','shipping','tired','ordinary','running','shoes','order'}
+    for key in VARIANTS:
+        v = variants.get(key) if isinstance(variants, dict) else None
+        script = str((v or {}).get('script','')).strip()
+        problems = []
+        if not script: problems.append('empty localized script')
+        if target != 'en' and re.sub(r'\W','',script.lower()) == re.sub(r'\W','',source.lower()):
+            problems.append('localized script is identical to source')
+        if target in {'es','fr','de'} and re.search(r'[\u0400-\u04ff]', script):
+            problems.append('Cyrillic contamination in Latin-script target')
+        tokens = set(re.findall(r"[A-Za-zÀ-ÿ]+", script.lower()))
+        if target != 'en' and len(tokens & english) >= 3 and len(tokens & words) == 0:
+            problems.append('significant English passthrough')
+        if target in {'es','fr','de'} and len(tokens & words) == 0:
+            problems.append(f'no recognizable {target} vocabulary')
+        try: confidence = float((v or {}).get('confidence', 0))
+        except (TypeError, ValueError): confidence = 0
+        if confidence < MIN_CONFIDENCE: problems.append(f'confidence below {MIN_CONFIDENCE}')
+        if problems: errors[key] = problems
+    return errors
+
+class LocalizationUnavailable(RuntimeError):
+    """Raised when no provider produces validated localization."""
+
+
 def _fallback(source, language):
+    # Kept for callers that explicitly need a safe preview, but never used as success.
     return {k:{"script":source, "sentence_changes":[{"original":source,"localized":source,"reason":"Fallback preserves source wording because no localization provider was available."}],"cultural_adaptations":[],"cta_recommendations":["Validate the CTA with a native-market reviewer."],"alternative_hooks":[],"alternative_headlines":[],"alternative_ctas":[],"compliance_notes":["No new claims were introduced. Verify all source claims before publication."],"confidence":0.35} for k in VARIANTS}
 
 def _parse(text, source, language):
@@ -26,20 +63,63 @@ def _parse(text, source, language):
         out[k]={"script":str(v.get("script",source)),"sentence_changes":v.get("sentence_changes",[]),"cultural_adaptations":v.get("cultural_adaptations",[]),"cta_recommendations":v.get("cta_recommendations",[]),"alternative_hooks":v.get("alternative_hooks",[]),"alternative_headlines":v.get("alternative_headlines",[]),"alternative_ctas":v.get("alternative_ctas",[]),"compliance_notes":v.get("compliance_notes",[]),"confidence":v.get("confidence",0.5)}
     return out
 
+def _localize_with_xkiro(prompt):
+    """OpenAI-compatible fallback via xKiro, retrying once on a backup model."""
+    import os
+    from openai import OpenAI
+    key = os.getenv("XKIRO_API_KEY")
+    if not key:
+        raise RuntimeError("XKIRO_API_KEY is not configured")
+    primary = os.getenv("XKIRO_MODEL", "minimax/minimax-m2.1")
+    backup = os.getenv("XKIRO_BACKUP_MODEL", "mistralai/ministral-3b")
+    models = [primary] + ([backup] if backup != primary else [])
+    client = OpenAI(api_key=key, base_url=os.getenv("XKIRO_BASE_URL", "https://api.xkiro.com/v1"), timeout=45, max_retries=0)
+    last_error = None
+    for model in models:
+        try:
+            r = client.chat.completions.create(model=model, messages=[{"role": "user", "content": prompt}], temperature=0.7)
+            return r.choices[0].message.content
+        except Exception as e:
+            last_error = e
+    raise last_error
+
+
 def localize_variants(source, target_lang, provider="auto"):
     language = {"de":"German","es":"Spanish","fr":"French","en":"English"}.get(target_lang,target_lang)
     prompt=VARIANT_PROMPT.format(language=language,source=source)
-    try:
-        if provider in ("gemini","auto") and __import__('os').getenv("GEMINI_API_KEY"):
-            import google.generativeai as genai, os
-            genai.configure(api_key=os.getenv("GEMINI_API_KEY")); model=genai.GenerativeModel(os.getenv("GEMINI_MODEL","gemini-2.0-flash"))
-            return _parse(model.generate_content(prompt, request_options={"timeout":45}).text,source,language)
-        if provider in ("openai","auto") and __import__('os').getenv("OPENAI_API_KEY"):
-            from openai import OpenAI
-            r=OpenAI().chat.completions.create(model="gpt-4o",messages=[{"role":"user","content":prompt}],temperature=.7,response_format={"type":"json_object"})
-            return _parse(r.choices[0].message.content,source,language)
-    except Exception as e: print(f"[SAMPLE] Variant LLM failed: {e}; using safe fallback")
-    return _fallback(source,language)
+    attempts = []
+    if provider in ("gemini","auto") and __import__('os').getenv("GEMINI_API_KEY"):
+        attempts.append(("gemini", _localize_with_gemini, prompt))
+    if provider in ("xkiro","auto") and __import__('os').getenv("XKIRO_API_KEY"):
+        attempts.append(("xkiro", _localize_with_xkiro, prompt))
+    if provider in ("openai","auto") and __import__('os').getenv("OPENAI_API_KEY"):
+        attempts.append(("openai", _localize_with_openai, prompt))
+    provider_errors = []
+    for name, fn, p in attempts:
+        try:
+            variants = _parse(fn(p), source, language)
+            validation = validate_variants(variants, source, target_lang)
+            if validation:
+                raise LocalizationUnavailable(f"{name} output failed validation: {json.dumps(validation)}")
+            return variants
+        except Exception as e:
+            provider_errors.append(f"{name}: {e}")
+            print(f"[SAMPLE] {name} failed: {e}")
+    if not attempts:
+        provider_errors.append("no configured localization provider")
+    raise LocalizationUnavailable("; ".join(provider_errors))
+
+
+def _localize_with_gemini(prompt):
+    import google.generativeai as genai, os
+    genai.configure(api_key=os.getenv("GEMINI_API_KEY")); model=genai.GenerativeModel(os.getenv("GEMINI_MODEL","gemini-2.0-flash"))
+    return model.generate_content(prompt, request_options={"timeout":45}).text
+
+
+def _localize_with_openai(prompt):
+    from openai import OpenAI
+    r=OpenAI().chat.completions.create(model="gpt-4o",messages=[{"role":"user","content":prompt}],temperature=.7,response_format={"type":"json_object"})
+    return r.choices[0].message.content
 
 def _items(value):
     return "\n".join(f"<li>{html.escape(str(x))}</li>" for x in (value or [])) or "<li>None supplied</li>"
