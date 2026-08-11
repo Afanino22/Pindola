@@ -6,10 +6,31 @@ VARIANTS = ("brand_match", "performance", "premium")
 VARIANT_LABELS = {"brand_match":"Brand Match", "performance":"Performance", "premium":"Premium"}
 VARIANT_PROMPT = '''You are a native {language} advertising copywriter. Return ONLY valid JSON with keys brand_match, performance, premium. Each value must be an object with keys script, sentence_changes (array of objects with original, localized, reason), cultural_adaptations (array), cta_recommendations (array), alternative_hooks (array), alternative_headlines (array), alternative_ctas (array), compliance_notes (array), confidence (number 0-1). Create three genuinely distinct versions: brand_match preserves voice; performance uses punchier conversion-focused language; premium is elevated and sophisticated. Preserve every factual claim exactly; never add or strengthen claims, medical efficacy, testing, guarantees, numbers, endorsements, or certifications not present in the source. Flag claims in compliance_notes as unverified rather than inventing them. Preserve brand/product names. Localize naturally for {language}.
 
+German umlauts ä, ö, ü and ß are valid Latin characters. Always write them correctly; never replace them with ae, oe, ue or ss.
+Always write correct French accents: é, è, ê, ë, à, â, î, ï, ô, ù, û, ç, œ. Never drop or replace them.
+Write ALL fields — sentence_changes, cultural_adaptations, cta_recommendations, alternative_hooks, alternative_headlines, alternative_ctas, compliance_notes — in {language}, not English.
+
 SOURCE SCRIPT:
 {source}'''
 
 MIN_CONFIDENCE = 0.75
+
+# Non-Latin scripts that must never appear in a Latin-script localization
+# (Cyrillic, CJK, Kana, Hangul, Arabic, Hebrew, Greek). Catches code-switch
+# contamination like "数字" / "未经验证" in scripts or metadata.
+NON_LATIN = re.compile(r"[\u0400-\u04ff\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af\u0600-\u06ff\u0370-\u03ff\u0590-\u05ff]")
+
+def _variant_text(v):
+    """Flatten a variant dict (script + all metadata fields) into one string for scanning."""
+    parts = [str(v.get('script', ''))]
+    for field in ('sentence_changes','cultural_adaptations','cta_recommendations',
+                  'alternative_hooks','alternative_headlines','alternative_ctas','compliance_notes'):
+        for item in (v.get(field) or []):
+            if isinstance(item, dict):
+                parts.extend(str(x) for x in item.values())
+            else:
+                parts.append(str(item))
+    return '\n'.join(parts)
 
 def validate_variants(variants, source, target_lang):
     """Return per-variant validation errors; never infer language from mere text difference."""
@@ -30,6 +51,8 @@ def validate_variants(variants, source, target_lang):
             problems.append('localized script is identical to source')
         if target in {'es','fr','de'} and re.search(r'[\u0400-\u04ff]', script):
             problems.append('Cyrillic contamination in Latin-script target')
+        if target in {'es','fr','de'} and NON_LATIN.search(_variant_text(v)):
+            problems.append('non-Latin contamination (CJK/Cyrillic/Arabic/etc.) in script or metadata')
         tokens = set(re.findall(r"[A-Za-zÀ-ÿ]+", script.lower()))
         if target != 'en' and len(tokens & english) >= 3 and len(tokens & words) == 0:
             problems.append('significant English passthrough')
@@ -84,15 +107,47 @@ def _localize_with_xkiro(prompt):
     raise last_error
 
 
+def _localize_with_groq(prompt):
+    """OpenAI-compatible PRIMARY provider via Groq (llama-3.3-70b-versatile).
+
+    Retries once with a short backoff on HTTP 429 (Groq's free tier TPM wall).
+    Any other failure raises immediately so the cascade can fall through to xKiro.
+    """
+    import os, time
+    from openai import OpenAI
+    key = os.getenv("GROQ_API_KEY")
+    if not key:
+        raise RuntimeError("GROQ_API_KEY is not configured")
+    model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    client = OpenAI(api_key=key, base_url=os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1"), timeout=45, max_retries=0)
+    last_error = None
+    for attempt in (0, 1):
+        try:
+            r = client.chat.completions.create(model=model, messages=[{"role": "user", "content": prompt}], temperature=0.7, max_tokens=4096)
+            return r.choices[0].message.content
+        except Exception as e:
+            last_error = e
+            if attempt == 0 and getattr(e, "status_code", None) == 429:
+                time.sleep(12)  # free tier TPM wall; back off once, then retry
+                continue
+            break
+    raise last_error
+
+
 def localize_variants(source, target_lang, provider="auto"):
     language = {"de":"German","es":"Spanish","fr":"French","en":"English"}.get(target_lang,target_lang)
     prompt=VARIANT_PROMPT.format(language=language,source=source)
     attempts = []
-    if provider in ("gemini","auto") and __import__('os').getenv("GEMINI_API_KEY"):
-        attempts.append(("gemini", _localize_with_gemini, prompt))
-    if provider in ("xkiro","auto") and __import__('os').getenv("XKIRO_API_KEY"):
+    # Auto cascade: Groq primary -> xKiro fallback. If both fail, LocalizationUnavailable
+    # is raised and the job is routed to needs_review (never silently "complete").
+    if provider in ("auto","groq"):
+        attempts.append(("groq", _localize_with_groq, prompt))
+    if provider in ("auto","xkiro"):
         attempts.append(("xkiro", _localize_with_xkiro, prompt))
-    if provider in ("openai","auto") and __import__('os').getenv("OPENAI_API_KEY"):
+    # Explicit-only providers, kept for backwards compatibility (NOT part of the auto cascade).
+    if provider == "gemini" and __import__('os').getenv("GEMINI_API_KEY"):
+        attempts.append(("gemini", _localize_with_gemini, prompt))
+    if provider == "openai" and __import__('os').getenv("OPENAI_API_KEY"):
         attempts.append(("openai", _localize_with_openai, prompt))
     provider_errors = []
     for name, fn, p in attempts:

@@ -8,7 +8,7 @@ GET  /samples/{job_id}/report  Structured localization report (changes, cultural
 GET  /samples/stats            Aggregate counts for project status dashboards
 
 Jobs are executed asynchronously on a background worker that calls
-sample_mode.localize_variants() (Gemini -> OpenAI -> safe fallback), so the
+sample_mode.localize_variants() (Groq -> xKiro, validated; both failed -> needs_review), so the
 MCP create_localization_sample tool returns a job_id immediately.
 """
 import asyncio
