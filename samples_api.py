@@ -151,13 +151,13 @@ def samples_stats():
     with samples_db() as c:
         c.execute("UPDATE samples SET status='needs_review', error=COALESCE(error, 'Legacy unvalidated/fallback output; blocked from prospect delivery') WHERE variants_json LIKE '%Fallback preserves source wording%' AND status='complete'")
         c.commit()
-        total = c.execute("SELECT COUNT(*) FROM samples").fetchone()[0]
-        completed = c.execute("SELECT COUNT(*) FROM samples WHERE status='complete'").fetchone()[0]
-        failed = c.execute("SELECT COUNT(*) FROM samples WHERE status='failed'").fetchone()[0]
-        needs_review = c.execute("SELECT COUNT(*) FROM samples WHERE status='needs_review'").fetchone()[0]
-        processing = c.execute("SELECT COUNT(*) FROM samples WHERE status IN ('queued','processing')").fetchone()[0]
+        total = c.execute("SELECT COUNT(*) FROM samples WHERE COALESCE(archived,0)=0").fetchone()[0]
+        completed = c.execute("SELECT COUNT(*) FROM samples WHERE status='complete' AND COALESCE(archived,0)=0").fetchone()[0]
+        failed = c.execute("SELECT COUNT(*) FROM samples WHERE status='failed' AND COALESCE(archived,0)=0").fetchone()[0]
+        needs_review = c.execute("SELECT COUNT(*) FROM samples WHERE status='needs_review' AND COALESCE(archived,0)=0").fetchone()[0]
+        processing = c.execute("SELECT COUNT(*) FROM samples WHERE status IN ('queued','processing') AND COALESCE(archived,0)=0").fetchone()[0]
         recent = c.execute(
-            "SELECT id, status, language, created_at, completed_at FROM samples ORDER BY created_at DESC LIMIT 10"
+            "SELECT id, status, language, created_at, completed_at FROM samples WHERE COALESCE(archived,0)=0 ORDER BY created_at DESC LIMIT 10"
         ).fetchall()
     return {
         "samples_total": total,
@@ -219,13 +219,13 @@ def samples_stats():
     with samples_db() as c:
         c.execute("UPDATE samples SET status='needs_review', error=COALESCE(error, 'Legacy unvalidated/fallback output; blocked from prospect delivery') WHERE variants_json LIKE '%Fallback preserves source wording%' AND status='complete'")
         c.commit()
-        total = c.execute("SELECT COUNT(*) FROM samples").fetchone()[0]
-        completed = c.execute("SELECT COUNT(*) FROM samples WHERE status='complete'").fetchone()[0]
-        failed = c.execute("SELECT COUNT(*) FROM samples WHERE status='failed'").fetchone()[0]
-        needs_review = c.execute("SELECT COUNT(*) FROM samples WHERE status='needs_review'").fetchone()[0]
-        processing = c.execute("SELECT COUNT(*) FROM samples WHERE status IN ('queued','processing')").fetchone()[0]
+        total = c.execute("SELECT COUNT(*) FROM samples WHERE COALESCE(archived,0)=0").fetchone()[0]
+        completed = c.execute("SELECT COUNT(*) FROM samples WHERE status='complete' AND COALESCE(archived,0)=0").fetchone()[0]
+        failed = c.execute("SELECT COUNT(*) FROM samples WHERE status='failed' AND COALESCE(archived,0)=0").fetchone()[0]
+        needs_review = c.execute("SELECT COUNT(*) FROM samples WHERE status='needs_review' AND COALESCE(archived,0)=0").fetchone()[0]
+        processing = c.execute("SELECT COUNT(*) FROM samples WHERE status IN ('queued','processing') AND COALESCE(archived,0)=0").fetchone()[0]
         recent = c.execute(
-            "SELECT id, status, language, created_at, completed_at FROM samples ORDER BY created_at DESC LIMIT 10"
+            "SELECT id, status, language, created_at, completed_at FROM samples WHERE COALESCE(archived,0)=0 ORDER BY created_at DESC LIMIT 10"
         ).fetchall()
     return {
         "samples_total": total,
