@@ -36,10 +36,28 @@ def validate_variants(variants, source, target_lang):
     """Return per-variant validation errors; never infer language from mere text difference."""
     errors = {}
     target = target_lang.lower().split('-')[0]
+    # Function-word (stop-word) sets: articles, prepositions, conjunctions,
+    # pronouns, common verbs, negation, common adverbs. Every natural sentence
+    # contains at least one of these regardless of topic, so they are a reliable
+    # language signal — unlike content words (e.g. serum, shipping/shoes) which
+    # only appear when the topic happens to mention them.
     words = {
-        'es': {'el','la','los','las','de','que','para','con','una','hoy','envío','zapatillas'},
-        'fr': {'le','la','les','des','de','pour','avec','une','aujourd','livraison','chaussures'},
-        'de': {'der','die','das','den','und','für','mit','eine','heute','versand','schuhe'},
+        'de': {'der','die','das','den','dem','des','ein','eine','einen','einem','einer',
+               'und','oder','aber','auch','für','mit','von','zu','im','in','auf','an',
+               'bei','aus','ist','sind','war','ich','sie','wir','es','nicht','kein',
+               'keine','so','wie','wenn','dann','heute','jetzt','hier','dein','deine',
+               'ihr','ihre','unser','unsere','diese','dieser','dieses','er','du','mir',
+               'mich','dir','dich','uns','euch','sich'},
+        'fr': {'le','la','les','des','de','du','un','une','et','ou','mais','aussi',
+               'pour','avec','sur','dans','à','au','aux','en','est','sont','je','tu',
+               'il','elle','nous','vous','ils','elles','ne','pas','non','ce','cette',
+               'ces','mon','ma','mes','ton','ta','tes','votre','vos','notre','nos',
+               'leur','leurs','aujourd','maintenant','ici'},
+        'es': {'el','la','los','las','de','del','un','una','unos','unas','y','o',
+               'pero','también','para','con','sobre','en','a','al','es','son','yo',
+               'tú','él','ella','nosotros','vosotros','usted','ustedes','ellos',
+               'ellas','no','sí','este','esta','estos','estas','mi','tu','su',
+               'nuestro','nuestra','hoy','ahora','aquí'},
     }.get(target, set())
     english = {'the','and','our','new','for','with','today','get','free','shipping','tired','ordinary','running','shoes','order'}
     for key in VARIANTS:
