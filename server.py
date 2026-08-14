@@ -5,12 +5,14 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from main import process_one_language
+from samples_api import router as samples_router, start_sample_worker, stop_sample_worker
 
 BASE = Path(__file__).resolve().parent
 UPLOADS = BASE / "uploads"; OUTPUT = BASE / "output"; DB = BASE / "jobs.db"
 MAX_UPLOAD = int(os.getenv("MAX_UPLOAD_MB", "200")) * 1024 * 1024
 STEPS = {"queued": 0, "extracting": 15, "transcribing": 30, "localizing": 50, "tts": 65, "subtitles": 78, "exporting": 90, "done": 100, "failed": 100}
 app = FastAPI(title="Pindola Localization API")
+app.include_router(samples_router)
 queue = asyncio.Queue(); worker_task = None
 
 def db():
@@ -41,10 +43,12 @@ async def startup():
     global worker_task
     UPLOADS.mkdir(exist_ok=True); OUTPUT.mkdir(exist_ok=True); db().close()
     worker_task = asyncio.create_task(worker())
+    start_sample_worker()
 
 @app.on_event("shutdown")
 async def shutdown():
     if worker_task: worker_task.cancel()
+    stop_sample_worker()
 
 @app.post("/jobs")
 async def create_job(file: UploadFile = File(...), target_language: str = Form(...)):
